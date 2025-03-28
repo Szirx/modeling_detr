@@ -32,6 +32,7 @@ class Config(BaseModel):
     scheduler: str
     scheduler_kwargs: dict
     pretrained: bool
+    threshold: float
 
     @classmethod
     def from_yaml(cls, path: str) -> 'Config':

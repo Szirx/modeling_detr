@@ -7,11 +7,12 @@ from dataset import CocoDetectionTransforms
 
 
 class DetrDataModule(pl.LightningDataModule):
-    def __init__(self, config: DataConfig):
+    def __init__(self, config: DataConfig, processor):
         super().__init__()
         self._config = config
         self.batch_size = self._config.batch_size
         self.n_workers = self._config.n_workers
+        self.processor = processor
         
         self.train_dataset: Optional[Dataset] = None
         self.valid_dataset: Optional[Dataset] = None
@@ -21,10 +22,12 @@ class DetrDataModule(pl.LightningDataModule):
             self.train_dataset = CocoDetectionTransforms(
                 self._config,
                 set_name='train',
+                processor=self.processor,
             )
             self.valid_dataset = CocoDetectionTransforms(
                 self._config,
                 set_name='val',
+                processor=self.processor,
             )
 
 

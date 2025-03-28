@@ -10,6 +10,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from lightning_module import DetrLightning
 from datamodule import DetrDataModule
+from transformers import DetrImageProcessor
 
 
 def arg_parse():
@@ -20,18 +21,28 @@ def arg_parse():
 
 def train(config: Config, config_file):
     os.environ["CUDA_VISIBLE_DEVICES"] = config.devices
+    torch.set_float32_matmul_precision('high')
 
     task = Task.init(project_name=config.project_name, task_name=config.task)
     logger = task.get_logger()
     clearml_logging(config, logger)
 
-    datamodule = DetrDataModule(config.data_config)
-    torch.set_float32_matmul_precision('high')
-    model = DetrLightning(config)
+
+    processor = DetrImageProcessor.from_pretrained(
+        config.model_path,
+        revision="no_timm",
+        size={
+            'max_height': config.data_config.processor_image_size,
+            'max_width': config.data_config.processor_image_size,
+        },
+    )
+
+    datamodule = DetrDataModule(config.data_config, processor)
+    model = DetrLightning(config, processor)
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
+        monitor=config.monitor_metric,
         dirpath="checkpoints",
-        filename="detr-{epoch:02d}-{val_loss:.2f}",
+        filename="detr-{epoch:02d}-{val_map_50:.2f}",
         save_top_k=2,
         mode='max',
     )

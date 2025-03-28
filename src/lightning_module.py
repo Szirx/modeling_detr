@@ -8,10 +8,16 @@ from transformers import DetrForObjectDetection, DetrConfig
 
 # https://github.com/Isalia20/DETR-finetune/blob/main/detr_model.py
 class DetrLightning(pl.LightningModule):
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, processor):
         super().__init__()
         self._config = config
-        
+        self.processor = processor
+
+        self.target_sizes = [(
+            self._config.data_config.processor_image_size,
+            self._config.data_config.processor_image_size,
+        )]
+
         if self._config.pretrained:
             self._model = DetrForObjectDetection.from_pretrained(
                 self._config.model_path,
@@ -24,7 +30,7 @@ class DetrLightning(pl.LightningModule):
             config = DetrConfig(num_labels=self._config.num_classes)
             self._model = DetrForObjectDetection(config)
         
-        metrics = get_metrics(box_format="xywh", class_metrics=True)
+        metrics = get_metrics(box_format="xyxy", class_metrics=True)
         self._valid_metrics = metrics.clone(prefix='val_')
         self._train_outputs: list = []
         self._val_outputs: list = []
@@ -57,16 +63,21 @@ class DetrLightning(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         self._model.eval()
-        loss, loss_dict = self.common_step(batch, batch_idx)
-        
-        # for k, v in loss_dict.items():
-        #     self.log(f"val_{k}", v.item(), prog_bar=True)
+        loss, _ = self.common_step(batch, batch_idx)
 
         with torch.no_grad():
             outputs = self._model(pixel_values=batch["pixel_values"])
+
+        results = self.processor.post_process_object_detection(
+            outputs,
+            target_sizes=[(self._config.data_config.processor_image_size,
+                           self._config.data_config.processor_image_size)] * batch["pixel_values"].shape[0],
+            threshold=self._config.threshold,
+        )
         
-        preds = self._convert_outputs_to_coco_format(outputs)
+        preds = self._convert_outputs_to_coco_format(results)
         targets = self._convert_labels_to_coco_format(batch["labels"])
+
         
         self._valid_metrics.update(preds, targets)
         self._val_outputs.append(loss)
@@ -106,27 +117,22 @@ class DetrLightning(pl.LightningModule):
             },
         }
 
-    def _convert_outputs_to_coco_format(self, outputs) -> List[Dict[str, Any]]:
-        """Convert DETR outputs to COCO evaluation format"""
-        preds = []
-        for idx in range(len(outputs.logits)):
-            boxes = outputs.pred_boxes[idx].cpu()
-            scores = outputs.logits[idx].softmax(-1)[:, :-1].max(-1).values.cpu()
-            labels = outputs.logits[idx].softmax(-1)[:, :-1].argmax(-1).cpu()
-            
+    def _convert_outputs_to_coco_format(self, results) -> List[Dict[str, Any]]:
+        preds: list = []
+        for result in results:
             preds.append({
-                "boxes": boxes,
-                "scores": scores,
-                "labels": labels
+                "boxes": result["boxes"].cpu(),
+                "scores": result["scores"].cpu(),
+                "labels": result["labels"].cpu(),
             })
         return preds
 
     def _convert_labels_to_coco_format(self, labels) -> List[Dict[str, Any]]:
         """Convert DETR labels to COCO evaluation format"""
-        targets = []
+        targets: list = []
         for label in labels:
             targets.append({
-                "boxes": label["boxes"].cpu(),
+                "boxes": label["non_norm_boxes"].cpu(),
                 "labels": label["class_labels"].cpu()
             })
         return targets
