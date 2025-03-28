@@ -4,7 +4,6 @@ import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, Dataset
 from dataset import CocoDetectionTransforms
-from augmentations import get_transforms
 
 
 class DetrDataModule(pl.LightningDataModule):
@@ -22,19 +21,10 @@ class DetrDataModule(pl.LightningDataModule):
             self.train_dataset = CocoDetectionTransforms(
                 self._config,
                 set_name='train',
-                transform=get_transforms(
-                    width=self._config.processor_image_size,
-                    height=self._config.processor_image_size,
-                ),
             )
             self.valid_dataset = CocoDetectionTransforms(
                 self._config,
-                set_name='valid',
-                transform=get_transforms(
-                    width=self._config.processor_image_size,
-                    height=self._config.processor_image_size,
-                    augmentations=False,
-                ),
+                set_name='val',
             )
 
 
@@ -44,7 +34,7 @@ class DetrDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.n_workers,
             shuffle=True,
-            collate_fn=self.collate_fn
+            collate_fn=self.collate_fn,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -53,7 +43,7 @@ class DetrDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.n_workers,
             shuffle=False,
-            collate_fn=self.collate_fn
+            collate_fn=self.collate_fn,
         )
 
     @staticmethod

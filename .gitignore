@@ -1,2 +1,5 @@
 venv
 .env
+checkpoints
+lightning_logs
+__pycache__

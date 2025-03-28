@@ -4,8 +4,10 @@ num_classes: 10
 n_epochs: 20
 accelerator: 'gpu'
 devices: '9'
+model_path: 'facebook/detr-resnet-50'
 monitor_metric: 'val_map_50'
-box_detection_per_img: 100
+num_queries: 50
+pretrained: True
 optimizer: 'torch.optim.AdamW'
 optimizer_kwargs:
   lr: 3e-4
@@ -26,9 +28,9 @@ mlflow_config:
   tracking_uri: ''
 
 data_config:
-  data_path: ''
-  batch_size: 8
-  n_workers: 2
-  image_size: 640
-  processor_image_size: 640
-  dataset_name: ''
+  data_path: '../modeling-yolov8/crop_dataset_'
+  batch_size: 16
+  n_workers: 4
+  image_size: 1280
+  processor_image_size: 1280
+  processor_path: 'facebook/detr-resnet-50'

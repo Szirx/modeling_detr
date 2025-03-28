@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from metrics import get_metrics
 from transformers import DetrForObjectDetection, DetrConfig
 
-
+# https://github.com/Isalia20/DETR-finetune/blob/main/detr_model.py
 class DetrLightning(pl.LightningModule):
     def __init__(self, config: Config):
         super().__init__()
@@ -16,14 +16,19 @@ class DetrLightning(pl.LightningModule):
             self._model = DetrForObjectDetection.from_pretrained(
                 self._config.model_path,
                 num_labels=self._config.num_classes,
-                ignore_mismatched_sizes=True
+                ignore_mismatched_sizes=True,
+                num_queries=self._config.num_queries,
             )
+            self._model.model.backbone.train()
         else:
             config = DetrConfig(num_labels=self._config.num_classes)
             self._model = DetrForObjectDetection(config)
         
-        metrics = get_metrics(class_metrics=True)
+        metrics = get_metrics(box_format="xywh", class_metrics=True)
         self._valid_metrics = metrics.clone(prefix='val_')
+        self._train_outputs: list = []
+        self._val_outputs: list = []
+        
 
     def forward(self, pixel_values, pixel_mask=None):
         return self._model(pixel_values=pixel_values, pixel_mask=pixel_mask)
@@ -36,26 +41,27 @@ class DetrLightning(pl.LightningModule):
             pixel_values=pixel_values,
             labels=labels
         )
-        
         loss = outputs.loss
         loss_dict = outputs.loss_dict
         
         return loss, loss_dict
 
     def training_step(self, batch, batch_idx):
+        self._model.train()
         loss, loss_dict = self.common_step(batch, batch_idx)
-        
+        self._train_outputs.append(loss)
         for k, v in loss_dict.items():
             self.log(f"train_{k}", v.item(), prog_bar=True)
-        
+
         return loss
 
     def validation_step(self, batch, batch_idx):
+        self._model.eval()
         loss, loss_dict = self.common_step(batch, batch_idx)
         
-        for k, v in loss_dict.items():
-            self.log(f"val_{k}", v.item(), prog_bar=True)
-        
+        # for k, v in loss_dict.items():
+        #     self.log(f"val_{k}", v.item(), prog_bar=True)
+
         with torch.no_grad():
             outputs = self._model(pixel_values=batch["pixel_values"])
         
@@ -63,12 +69,25 @@ class DetrLightning(pl.LightningModule):
         targets = self._convert_labels_to_coco_format(batch["labels"])
         
         self._valid_metrics.update(preds, targets)
-        
+        self._val_outputs.append(loss)
         return loss
 
     def on_validation_epoch_end(self):
-        map_metrics = self._valid_metrics.compute()
-        self.log_dict({f"val_{k}": v for k, v in map_metrics.items()})
+        avg_loss = torch.stack(self._val_outputs).mean()
+
+        for key, value in self._valid_metrics.compute().items():
+            if 'per_class' in key:
+                self.log(key, value.mean(), on_epoch=True)
+            elif 'classes' in key:
+                continue
+            else:
+                if value.numel() > 0:
+                    self.log(key, value, on_epoch=True)
+
+        self.log('val_loss', avg_loss, on_epoch=True)
+        
+        self._train_outputs.clear()
+        self._val_outputs.clear()
         self._valid_metrics.reset()
 
     def configure_optimizers(self):
