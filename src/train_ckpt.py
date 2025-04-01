@@ -65,7 +65,18 @@ def train(config: Config, config_file):
         name='config_file',
         artifact_object=config_file,
     )
-    trainer.fit(model, datamodule=datamodule)
+    trainer.fit(model=model,
+                ckpt_path=config.ckpt_path,
+                datamodule=datamodule,
+    )
+
+    trained_model = DetrLightning.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
+    trained_model.model.save_pretrained('saved_models/detr/')
+    task.upload_artifact(
+        name='best_transformers_model',
+        artifact_object='saved_models/detr'
+    )
+
 
 
 if __name__ == '__main__':

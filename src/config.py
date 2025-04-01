@@ -27,6 +27,8 @@ class Config(BaseModel):
     monitor_metric: str
     task: str
     model_path: str
+    ckpt_path: str
+    id2label: dict
     optimizer: str
     optimizer_kwargs: dict
     scheduler: str

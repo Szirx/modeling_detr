@@ -1,9 +1,9 @@
-from typing import List, Dict, Any
 from config import Config
 from train_utils import load_object
 import torch
 import pytorch_lightning as pl
 from metrics import get_metrics
+from transformers.image_transforms import center_to_corners_format
 from transformers import DetrForObjectDetection, DetrConfig
 
 # https://github.com/Isalia20/DETR-finetune/blob/main/detr_model.py
@@ -12,7 +12,6 @@ class DetrLightning(pl.LightningModule):
         super().__init__()
         self._config = config
         self.processor = processor
-
         self.target_sizes = [(
             self._config.data_config.processor_image_size,
             self._config.data_config.processor_image_size,
@@ -24,62 +23,58 @@ class DetrLightning(pl.LightningModule):
                 num_labels=self._config.num_classes,
                 ignore_mismatched_sizes=True,
                 num_queries=self._config.num_queries,
+                id2label=self._config.id2label,
+                label2id={v:k for k,v in self._config.id2label.items()},
             )
-            self._model.model.backbone.train()
         else:
             config = DetrConfig(num_labels=self._config.num_classes)
             self._model = DetrForObjectDetection(config)
         
-        metrics = get_metrics(box_format="xyxy", class_metrics=True)
+        metrics = get_metrics(box_format="cxcywh", iou_type="bbox", class_metrics=False)
+        self._train_metrics = metrics.clone(prefix='train_')
         self._valid_metrics = metrics.clone(prefix='val_')
-        self._train_outputs: list = []
         self._val_outputs: list = []
         
-
-    def forward(self, pixel_values, pixel_mask=None):
-        return self._model(pixel_values=pixel_values, pixel_mask=pixel_mask)
-
-    def common_step(self, batch, batch_idx):
+    def common_step(self, batch):
         pixel_values = batch["pixel_values"]
-        labels = batch["labels"]
+        pixel_mask = batch["pixel_mask"]
+        labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
         
         outputs = self._model(
             pixel_values=pixel_values,
+            pixel_mask=pixel_mask,
             labels=labels
         )
+
         loss = outputs.loss
         loss_dict = outputs.loss_dict
         
         return loss, loss_dict
 
     def training_step(self, batch, batch_idx):
-        self._model.train()
-        loss, loss_dict = self.common_step(batch, batch_idx)
-        self._train_outputs.append(loss)
+        loss, loss_dict = self.common_step(batch)
+        self.update_map(batch, mode='train')
         for k, v in loss_dict.items():
             self.log(f"train_{k}", v.item(), prog_bar=True)
 
         return loss
 
+    def on_train_epoch_end(self):
+
+        for key, value in self._train_metrics.compute().items():
+            if 'per_class' in key:
+                self.log(key, value.mean(), on_epoch=True)
+            elif 'classes' in key:
+                continue
+            else:
+                if value.numel() > 0:
+                    self.log(key, value, on_epoch=True)
+        
+        self._train_metrics.reset()
+
     def validation_step(self, batch, batch_idx):
-        self._model.eval()
-        loss, _ = self.common_step(batch, batch_idx)
-
-        with torch.no_grad():
-            outputs = self._model(pixel_values=batch["pixel_values"])
-
-        results = self.processor.post_process_object_detection(
-            outputs,
-            target_sizes=[(self._config.data_config.processor_image_size,
-                           self._config.data_config.processor_image_size)] * batch["pixel_values"].shape[0],
-            threshold=self._config.threshold,
-        )
-        
-        preds = self._convert_outputs_to_coco_format(results)
-        targets = self._convert_labels_to_coco_format(batch["labels"])
-
-        
-        self._valid_metrics.update(preds, targets)
+        loss, _ = self.common_step(batch)
+        self.update_map(batch)
         self._val_outputs.append(loss)
         return loss
 
@@ -97,10 +92,14 @@ class DetrLightning(pl.LightningModule):
 
         self.log('val_loss', avg_loss, on_epoch=True)
         
-        self._train_outputs.clear()
         self._val_outputs.clear()
         self._valid_metrics.reset()
 
+    def predict_image(self, batch):
+        with torch.no_grad():
+            outputs = self._model(pixel_values=batch["pixel_values"].cuda(), pixel_mask=batch["pixel_mask"].cuda())
+        return outputs
+    
     def configure_optimizers(self):
         optimizer = load_object(self._config.optimizer)(
             self._model.parameters(),
@@ -117,22 +116,28 @@ class DetrLightning(pl.LightningModule):
             },
         }
 
-    def _convert_outputs_to_coco_format(self, results) -> List[Dict[str, Any]]:
-        preds: list = []
-        for result in results:
-            preds.append({
-                "boxes": result["boxes"].cpu(),
-                "scores": result["scores"].cpu(),
-                "labels": result["labels"].cpu(),
-            })
-        return preds
-
-    def _convert_labels_to_coco_format(self, labels) -> List[Dict[str, Any]]:
-        """Convert DETR labels to COCO evaluation format"""
-        targets: list = []
-        for label in labels:
-            targets.append({
-                "boxes": label["non_norm_boxes"].cpu(),
-                "labels": label["class_labels"].cpu()
-            })
-        return targets
+    def update_map(self, batch, mode='val'):
+            outputs = self.predict_image(batch)
+        
+            postprocessed_outputs = self.processor.post_process_object_detection(
+                outputs,
+                threshold=self._config.threshold,
+            )
+            predictions = [
+                {
+                    "boxes": postprocessed_output["boxes"].unsqueeze(0).cuda() if len(postprocessed_output["boxes"].shape) == 1 else postprocessed_output["boxes"].cuda(),
+                    "labels": torch.tensor(postprocessed_output["labels"], device="cuda", dtype=torch.int),
+                    "scores": postprocessed_output["scores"].cuda(),
+                } for postprocessed_output in postprocessed_outputs
+            ]
+            target = [center_to_corners_format(i["boxes"]).squeeze(0).cuda() for i in batch["labels"]]
+            ground_truths = [
+                {
+                    "boxes": box.unsqueeze(0) if len(box.shape) == 1 else box,
+                    "labels": batch["labels"][i]["class_labels"].to("cuda"),
+                } for i, box in enumerate(target)
+            ]
+            if mode == 'train':
+                self._train_metrics.update(predictions, ground_truths)
+            elif mode == 'val':
+                self._valid_metrics.update(predictions, ground_truths)

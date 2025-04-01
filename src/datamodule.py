@@ -10,10 +10,13 @@ class DetrDataModule(pl.LightningDataModule):
     def __init__(self, config: DataConfig, processor):
         super().__init__()
         self._config = config
+
         self.batch_size = self._config.batch_size
         self.n_workers = self._config.n_workers
+
         self.processor = processor
-        
+        self.collator = BatchCollator(processor=processor)
+
         self.train_dataset: Optional[Dataset] = None
         self.valid_dataset: Optional[Dataset] = None
     
@@ -37,7 +40,7 @@ class DetrDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.n_workers,
             shuffle=True,
-            collate_fn=self.collate_fn,
+            collate_fn=self.collator,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -46,17 +49,20 @@ class DetrDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.n_workers,
             shuffle=False,
-            collate_fn=self.collate_fn,
+            collate_fn=self.collator,
         )
 
-    @staticmethod
-    def collate_fn(batch):
-        pixel_values = [item["pixel_values"] for item in batch]
-        labels = [item["labels"] for item in batch]
-        
-        pixel_values = torch.stack(pixel_values)
-        
-        return {
-            "pixel_values": pixel_values,
-            "labels": labels
-        }
+class BatchCollator:
+    def __init__(self, processor):
+        super().__init__()
+        self.processor = processor
+
+    def __call__(self, batch):
+        pixel_values = [item[0] for item in batch if item is not None]
+        encoding = self.processor.pad(pixel_values, return_tensors="pt")
+        labels = [item[1] for item in batch if item is not None]
+        batch: dict = {}
+        batch['pixel_values'] = encoding['pixel_values']
+        batch['pixel_mask'] = encoding['pixel_mask']
+        batch['labels'] = labels
+        return batch
