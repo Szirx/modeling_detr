@@ -1,18 +1,18 @@
-project_name: 'modeling-detr'
-task: 'detection-detr'
-num_classes: 11
+num_classes: 1
 id2label:
-  0: 'dump_truck'
-  1: 'excavator'
-  2: 'motor_grader'
-  3: 'ice_rink'
-  4: 'kmu'
-  5: 'trailer'
-  6: 'forklift'
-  7: 'bucket_loader'
-  8: 'mixer'
-  9: 'tank'
-  10: 'bulldozer'
+  0: 'building'
+# id2label:
+#   0: 'dump_truck'
+#   1: 'excavator'
+#   2: 'motor_grader'
+#   3: 'ice_rink'
+#   4: 'kmu'
+#   5: 'trailer'
+#   6: 'forklift'
+#   7: 'bucket_loader'
+#   8: 'mixer'
+#   9: 'tank'
+#   10: 'bulldozer'
 
 n_epochs: 100
 accelerator: 'gpu'
@@ -20,38 +20,38 @@ devices: '9'
 model_path: 'facebook/detr-resnet-50'
 ckpt_path: 'lightning_logs/version_1/checkpoints/detr-epoch=73-val_map_50=0.15.ckpt'
 monitor_metric: 'val_map_50'
-pretrained: True
 threshold: 0.8
 num_queries: 100
+patience: 100
+log_every_n_steps: 1
+save_top_k: 1
+model: transformers.DetrForObjectDetection # RTDetrForObjectDetection / DetrForObjectDetection
+processor: transformers.DetrImageProcessor # RTDetrImageProcessor / DetrImageProcessor
+
 optimizer: 'torch.optim.AdamW'
 optimizer_kwargs:
-  lr: 1e-5
+  lr: 1e-4
   weight_decay: 1e-4
-
-# scheduler: 'cosine_annealing_warmup.CosineAnnealingWarmupRestarts'
-# scheduler_kwargs:
-#   first_cycle_steps: 50
-#   cycle_mult: 1.0
-#   max_lr: 3e-4
-#   min_lr: 1e-5
-#   warmup_steps: 1
-#   gamma: 1.0
-#   last_epoch: -1
 
 scheduler: 'torch.optim.lr_scheduler.CosineAnnealingLR'
 scheduler_kwargs:
-  T_max: 200
+  T_max: 100
   eta_min: 1e-6
+
+data_config:
+  # data_path: '../modeling-yolov8/crop_dataset_'
+  data_path: '../../shared_data/datasets/SatelliteTo3D-Datasets/segment_project.v2i.coco-segmentation'
+  batch_size: 8
+  n_workers: 4
+  image_size: 640
+  processor_image_size: 640
+
+clearml_config:
+  project_name: 'modeling-detr'
+  task: 'detection-detr'
 
 mlflow_config:
   run_name: 'detr'
   experiment_name: 'detr'
   tracking_uri: ''
 
-data_config:
-  data_path: '../modeling-yolov8/crop_dataset_'
-  batch_size: 8
-  n_workers: 4
-  image_size: 1280
-  processor_image_size: 1280
-  processor_path: 'facebook/detr-resnet-50'

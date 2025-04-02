@@ -2,6 +2,7 @@ import os
 import argparse
 from clearml import Task
 from clearml_log import clearml_logging
+from train_utils import load_object
 
 from config import Config
 import torch
@@ -10,7 +11,6 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from lightning_module import DetrLightning
 from datamodule import DetrDataModule
-from transformers import DetrImageProcessor
 
 
 def arg_parse():
@@ -23,12 +23,14 @@ def train(config: Config, config_file):
     os.environ["CUDA_VISIBLE_DEVICES"] = config.devices
     torch.set_float32_matmul_precision('high')
 
-    task = Task.init(project_name=config.project_name, task_name=config.task)
+    task = Task.init(
+        project_name=config.clearml_config.project_name,
+        task_name=config.clearml_config.task,
+    )
     logger = task.get_logger()
     clearml_logging(config, logger)
 
-
-    processor = DetrImageProcessor.from_pretrained(
+    processor = load_object(config.processor).from_pretrained(
         config.model_path,
         size={
             'max_height': config.data_config.processor_image_size,
@@ -41,14 +43,14 @@ def train(config: Config, config_file):
     checkpoint_callback = ModelCheckpoint(
         monitor=config.monitor_metric,
         filename="detr-{epoch:02d}-{val_map_50:.2f}",
-        save_top_k=1,
+        save_top_k=config.save_top_k,
         verbose=True,
         mode='max',
     )
 
     early_stopping = EarlyStopping(
     monitor=config.monitor_metric,
-        patience=100,
+        patience=config.patience,
         mode='max',
     )
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
@@ -58,7 +60,7 @@ def train(config: Config, config_file):
         max_epochs=config.n_epochs,
         precision='32-true',
         callbacks=[checkpoint_callback, early_stopping, lr_monitor],
-        log_every_n_steps=1,
+        log_every_n_steps=config.log_every_n_steps,
         
     )
     task.upload_artifact(

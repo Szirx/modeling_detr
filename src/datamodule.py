@@ -29,7 +29,7 @@ class DetrDataModule(pl.LightningDataModule):
             )
             self.valid_dataset = CocoDetectionTransforms(
                 self._config,
-                set_name='val',
+                set_name='valid',
                 processor=self.processor,
             )
 

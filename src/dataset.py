@@ -5,7 +5,7 @@ import torch
 from config import DataConfig
 from torchvision.datasets import CocoDetection
 from torchvision import transforms
-from transformers import DetrImageProcessor
+from transformers import DetrImageProcessor, RTDetrImageProcessor
 import torch.nn.functional as F
 
 def pad_to_size(image_tensor, target_size=(1280, 1280)):
@@ -36,11 +36,11 @@ class CocoDetectionTransforms(CocoDetection):
         self,
         config: DataConfig,
         set_name: str,
-        processor: DetrImageProcessor,
+        processor: DetrImageProcessor | RTDetrImageProcessor,
     ):
         self._config = config
         self.set_name = set_name
-        root = os.path.join(self._config.data_path + self.set_name, 'images')
+        root = os.path.join(self._config.data_path, self.set_name)
         annotation_file = os.path.join(root, "_annotations.coco.json")
         self.processor = processor
         super().__init__(root=root, annFile=annotation_file)

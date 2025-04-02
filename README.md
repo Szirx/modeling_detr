@@ -14,18 +14,18 @@ End-to-End Object Detection with Transformers (DETR) implementation with PyTorch
 
 1. Clone the repository:
 
-```bash
-git clone https://github.com/Szirx/modeling_detr.git
-cd modeling_detr
-```
+    ```bash
+    git clone https://github.com/Szirx/modeling_detr.git
+    cd modeling_detr
+    ```
 
 2. Install dependencies:
 
-```bash
-make install
-# or manually:
-pip install -r requirements.txt
-```
+    ```bash
+    make install
+    # or manually:
+    pip install -r requirements.txt
+    ```
 
 ## Quick start
 

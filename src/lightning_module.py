@@ -4,7 +4,6 @@ import torch
 import pytorch_lightning as pl
 from metrics import get_metrics
 from transformers.image_transforms import center_to_corners_format
-from transformers import DetrForObjectDetection, DetrConfig
 
 # https://github.com/Isalia20/DETR-finetune/blob/main/detr_model.py
 class DetrLightning(pl.LightningModule):
@@ -17,19 +16,15 @@ class DetrLightning(pl.LightningModule):
             self._config.data_config.processor_image_size,
         )]
 
-        if self._config.pretrained:
-            self._model = DetrForObjectDetection.from_pretrained(
-                self._config.model_path,
-                num_labels=self._config.num_classes,
-                ignore_mismatched_sizes=True,
-                num_queries=self._config.num_queries,
-                id2label=self._config.id2label,
-                label2id={v:k for k,v in self._config.id2label.items()},
-            )
-        else:
-            config = DetrConfig(num_labels=self._config.num_classes)
-            self._model = DetrForObjectDetection(config)
-        
+        self._model = load_object(self._config.model).from_pretrained(
+            pretrained_model_name_or_path=self._config.model_path,
+            num_labels=self._config.num_classes,
+            ignore_mismatched_sizes=True,
+            num_queries=self._config.num_queries,
+            id2label=self._config.id2label,
+            label2id={v:k for k,v in self._config.id2label.items()},
+        )
+
         metrics = get_metrics(box_format="cxcywh", iou_type="bbox", class_metrics=False)
         self._train_metrics = metrics.clone(prefix='train_')
         self._valid_metrics = metrics.clone(prefix='val_')
