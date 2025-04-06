@@ -1,6 +1,6 @@
 def clearml_logging(config, logger):
     for hyperparam in config:
-        if hyperparam[0] in ['data_config', 'mlflow_config']:
+        if hyperparam[0] in ['data_config', 'mlflow_config', 'clearml_config']:
             for hyperparam_data in hyperparam[1]:
                 report(hyperparam_data, logger)
         else:

@@ -72,6 +72,11 @@ class DetrLightning(pl.LightningModule):
         self.update_map(batch)
         self._val_outputs.append(loss)
         return loss
+    
+    def predict_step(self, batch):
+        with torch.no_grad():
+            outputs = self._model(pixel_values=batch["pixel_values"].cuda(), pixel_mask=batch["pixel_mask"].cuda())
+        return outputs
 
     def on_validation_epoch_end(self):
         avg_loss = torch.stack(self._val_outputs).mean()

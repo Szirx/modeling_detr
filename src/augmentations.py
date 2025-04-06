@@ -1,42 +1,64 @@
-import albumentations as albu
-from albumentations.pytorch import ToTensorV2
+from torchvision.transforms import functional as F  # Правильный импорт
+import torch
+from torchvision.transforms.functional import hflip
+import random
 
 
-# https://www.kaggle.com/code/artgor/object-detection-with-pytorch-lightning
-def get_transforms(
-        width: int,
-        height: int,
-        preprocessing: bool = True,
-        augmentations: bool = True,
-        postprocessing: bool = True,
-) -> albu.Compose:
-    transforms: list = []
+def hflip_image_and_targets(image, target):
+    target_boxes = target["boxes"]
+    target_xs = target_boxes[:, [0]]
+    target_xs = 1 - target_xs
+    image = hflip(image)
+    targets = torch.cat([target_xs, target_boxes[:, 1:]], dim=1)
+    target["boxes"] = targets
+    return image, target
 
-    if preprocessing:
-        transforms.append(albu.Resize(height=height, width=width))
+
+def color_jitter(pil_img, p=0.5):
+        img_tensor = F.to_tensor(pil_img)
+        """Цветовые аугментации"""
+        # Random brightness
+        if random.random() < p:
+            brightness_factor = random.uniform(0.8, 1.2)
+            img_tensor = F.adjust_brightness(img_tensor, brightness_factor)
+        
+        # Random contrast
+        if random.random() < p:
+            contrast_factor = random.uniform(0.8, 1.2)
+            img_tensor = F.adjust_contrast(img_tensor, contrast_factor)
+        
+        # Random saturation
+        if random.random() < p:
+            saturation_factor = random.uniform(0.8, 1.2)
+            img_tensor = F.adjust_saturation(img_tensor, saturation_factor)
+        
+        # Random hue
+        if random.random() < p:
+            hue_factor = random.uniform(-0.1, 0.1)
+            img_tensor = F.adjust_hue(img_tensor, hue_factor)
+        
+        pil_img = F.to_pil_image(img_tensor)
+        return pil_img
+
+
+def pad_to_size(image_tensor, target_size=(1280, 1280)):
+    """
+    Добавляет паддинг к изображению до target_size (H, W)
+    Args:
+        image_tensor: torch.Tensor [B, C, H, W] или [C, H, W]
+        target_size: кортеж (height, width)
+    Returns:
+        Padded tensor [B, C, target_height, target_width]
+    """
+    if len(image_tensor.shape) == 3:
+        image_tensor = image_tensor.unsqueeze(0)
     
-    if augmentations:
-        transforms.extend(
-            [
-                albu.HorizontalFlip(p=0.5),
-                albu.HueSaturationValue(
-                    hue_shift_limit=20,
-                    sat_shift_limit=30,
-                    val_shift_limit=20,
-                    p=0.5,
-                ),
-                albu.RandomRain(p=0.5),
-                albu.RandomBrightnessContrast(
-                    brightness_limit=0.2,
-                    contrast_limit=0.2,
-                    p=0.5,
-                ),
-                albu.ShiftScaleRotate(),
-                albu.GaussianBlur(),
-            ],
-        )
+    _, _, h, w = image_tensor.shape
+    target_h, target_w = target_size
     
-    if postprocessing:
-        transforms.extend([albu.Normalize(), ToTensorV2()])
+    pad_h = max(target_h - h, 0)
+    pad_w = max(target_w - w, 0)
     
-    return albu.Compose(transforms)
+    padding = (0, pad_w, 0, pad_h)
+    
+    return F.pad(image_tensor, padding, mode='constant', value=0)

@@ -2,57 +2,81 @@ from pytorch_lightning.callbacks import Callback
 import torch
 import numpy as np
 import cv2
+from PIL import Image, ImageDraw
+import matplotlib.pyplot as plt
 
 class PredictAfterValidationCallback(Callback):
-    def __init__(self, logger):
+    def __init__(self, logger, num_images_to_log=8):
         super().__init__()
         self.logger = logger
+        self.num_images_to_log = num_images_to_log
+        self.colors = plt.cm.get_cmap('tab20', 20).colors * 255  # Colors for different classes
 
     def setup(self, trainer, pl_module, stage):
         if stage in ("fit", "validate"):
-            # setup the predict data even for fit/validate, as we will call it during `on_validation_epoch_end`
             trainer.datamodule.setup("predict")
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.sanity_checking:  # optional skip
+        if trainer.sanity_checking:
             return
 
         val_dataloader = trainer.datamodule.val_dataloader()
-        batch = pl_module.transfer_batch_to_device(next(iter(val_dataloader)), trainer.strategy.root_device, 0)
+        batch = next(iter(val_dataloader))
+        batch = pl_module.transfer_batch_to_device(batch, trainer.strategy.root_device, 0)
 
-        outputs = pl_module.predict_step(batch)
+        # Get model predictions
+        outputs = pl_module._model(**batch)
+        
+        # Convert outputs to readable format
+        processed_outputs = pl_module.processor.post_process_object_detection(
+            outputs,
+            threshold=0.5,
+            target_sizes=[torch.tensor(img.shape[1:]) for img in batch["pixel_values"]]
+        )
+
+        # Denormalize images
         images = self.denormalize(batch['pixel_values'])
-        for i, out in enumerate(outputs[:]):
-            image = images[i].permute(1,2,0).cpu().numpy()
-            masked_image = self.draw_random_masks(image, out['segmentation'].cpu().numpy())
-
-            self.logger.report_image(title='validation_epoch', series=f'{i}_image', iteration=trainer.current_epoch, image=image)
-            self.logger.report_image(title='validation_epoch', series=f'{i}_mask', iteration=trainer.current_epoch, image=masked_image)
+        
+        # Log images with predictions
+        for i, (image, detections) in enumerate(zip(images[:self.num_images_to_log], processed_outputs[:self.num_images_to_log])):
+            img_with_boxes = self.draw_detections(
+                image.permute(1, 2, 0).cpu().numpy(),
+                detections['boxes'].cpu().numpy(),
+                detections['labels'].cpu().numpy(),
+                detections['scores'].cpu().numpy()
+            )
+            
+            self.logger.report_image(
+                title='validation_predictions',
+                series=f'epoch_{trainer.current_epoch}_img_{i}',
+                iteration=trainer.current_epoch,
+                image=img_with_boxes
+            )
 
     @staticmethod
     def denormalize(x):
-        mean=np.array([123.675, 116.280, 103.530]) / 255
-        std=np.array([58.395, 57.120, 57.375]) / 255
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(x.device)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1).to(x.device)
+        return torch.clamp((x * std) + mean, 0, 1)
 
-        # 3, H, W, B
-        ten = x.clone().permute(1, 2, 3, 0)
-        for t, m, s in zip(ten, mean, std):
-            t.mul_(s).add_(m)
-        # B, 3, H, W
-        return torch.clamp(ten, 0, 1).permute(3, 0, 1, 2)
-
-    @staticmethod
-    def draw_random_masks(image, masks):
-        alpha = 0.3
-        masked_image = image.copy()
-        max_value = 255
-        if len(masks.shape) == 2:
-            masks = np.expand_dims(masks, axis=0)
-        for mask in masks:
-            masked_image = np.where(
-                np.repeat(mask[:, :, np.newaxis], 3, axis=2),
-                np.random.randint(0, max_value, size=(3)),
-                masked_image,
-            )
-            masked_image = masked_image.astype(np.uint8)
-        return cv2.addWeighted(image, alpha, masked_image, 1 - alpha, 0, dtype=cv2.CV_8U)
+    def draw_detections(self, image, boxes, labels, scores):
+        """Draw bounding boxes and labels on image"""
+        # Convert numpy array to PIL Image
+        image = (image * 255).astype(np.uint8)
+        image = Image.fromarray(image)
+        draw = ImageDraw.Draw(image)
+        
+        for box, label, score in zip(boxes, labels, scores):
+            # Convert box from [xmin, ymin, xmax, ymax] to PIL format
+            box = [float(coord) for coord in box]
+            color = tuple(self.colors[label % len(self.colors)].astype(int).tolist())
+            
+            # Draw rectangle
+            draw.rectangle(box, outline=color, width=2)
+            
+            # Draw label text
+            text = f"{label}: {score:.2f}"
+            text_position = (box[0], box[1] - 10)
+            draw.text(text_position, text, fill=color)
+        
+        return np.array(image)

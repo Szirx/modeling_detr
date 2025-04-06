@@ -11,6 +11,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from lightning_module import DetrLightning
 from datamodule import DetrDataModule
+from predict_callback import PredictAfterValidationCallback
 
 
 def arg_parse():
@@ -59,7 +60,12 @@ def train(config: Config, config_file):
         devices=1,
         max_epochs=config.n_epochs,
         precision='32-true',
-        callbacks=[checkpoint_callback, early_stopping, lr_monitor],
+        callbacks=[
+            checkpoint_callback,
+            early_stopping,
+            lr_monitor,
+            PredictAfterValidationCallback(logger=logger),
+        ],
         log_every_n_steps=config.log_every_n_steps,
         
     )

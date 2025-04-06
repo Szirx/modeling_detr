@@ -1,6 +1,5 @@
 from typing import Optional
 from config import DataConfig
-import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, Dataset
 from dataset import CocoDetectionTransforms
