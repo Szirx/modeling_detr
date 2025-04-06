@@ -4,9 +4,10 @@ import numpy as np
 import torch
 from config import DataConfig
 from torchvision.datasets import CocoDetection
-from torchvision import transforms
 from transformers import DetrImageProcessor, RTDetrImageProcessor
 import torch.nn.functional as F
+from augmentations import hflip_image_and_targets, color_jitter
+
 
 def pad_to_size(image_tensor, target_size=(1280, 1280)):
     """
@@ -48,29 +49,22 @@ class CocoDetectionTransforms(CocoDetection):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         img, target = super().__getitem__(idx)
         
-        # Преобразуем изображение в тензор и добавляем паддинг
-        img_tensor = torch.tensor(np.array(img)).permute(2, 0, 1).float()  # C, H, W
-        padded_img = pad_to_size(
-            img_tensor,
-            target_size=(
-                self._config.processor_image_size,
-                self._config.processor_image_size,
-            ),
-        )
-        
-        # Преобразуем обратно в PIL Image для обработки процессором
-        padded_img_pil = transforms.ToPILImage()(padded_img.squeeze(0))
 
         for item in target:
             item['category_id'] -= 1
 
+        if self.set_name == 'train':
+            img = color_jitter(img, p=0.5)
+
         image_id = self.ids[idx]
         selected_target = {'image_id': image_id, 'annotations': target}
         encoding = self.processor(
-            images=padded_img_pil,
+            images=img,
             annotations=selected_target,
             return_tensors="pt"
         )
         pixel_values = encoding["pixel_values"].squeeze()
         target_return = encoding["labels"][0] if len(encoding["labels"]) > 0 else torch.tensor([])
+        if self.set_name == 'train':
+            pixel_values, target_return = hflip_image_and_targets(pixel_values, target_return, p=0.5)
         return pixel_values, target_return

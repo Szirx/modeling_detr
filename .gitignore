@@ -3,3 +3,4 @@ venv
 checkpoints
 lightning_logs
 __pycache__
+saved_models

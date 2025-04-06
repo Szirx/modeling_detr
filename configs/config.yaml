@@ -14,7 +14,7 @@ id2label:
 #   9: 'tank'
 #   10: 'bulldozer'
 
-n_epochs: 100
+n_epochs: 5
 accelerator: 'gpu'
 devices: '9'
 model_path: 'facebook/detr-resnet-50'
